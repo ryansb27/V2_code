@@ -1,0 +1,57 @@
+// Pin Definitions
+const int comparatorPin = 2;   // Comparator output (Interrupt Pin)
+const int pwmPin = 9;          // PWM Output to Motor Driver
+
+// Variables
+volatile unsigned long pulseCount = 0; // Pulse counter (Interrupt increments this)
+unsigned long prevTime = 0;  // Time tracking for RPM calculation
+float rpm = 0;               // Measured RPM
+int targetRPM = 3000;        // Desired RPM (Can be adjusted via Serial or Potentiometer)
+int pwmValue = 128;          // PWM duty cycle (0-255)
+
+// Interrupt Service Routine (ISR) - Runs on each rising edge
+void countPulse() {
+    pulseCount++; // Increase pulse count on each rising edge
+}
+
+void setup() {
+    Serial.begin(9600);
+
+    pinMode(comparatorPin, INPUT); // Comparator output as input
+    pinMode(pwmPin, OUTPUT);       // Motor PWM output
+
+    attachInterrupt(digitalPinToInterrupt(comparatorPin), countPulse, RISING); // Interrupt on rising edge
+
+    analogWrite(pwmPin, pwmValue); // Start motor with initial PWM
+}
+
+void loop() {
+    unsigned long currentTime = millis();  // Get current time
+
+    // Calculate RPM every second
+    if (currentTime - prevTime >= 1000) {  // Every 1 second
+        noInterrupts();  // Temporarily disable interrupts to read pulseCount safely
+        rpm = (pulseCount * 60);  // Convert to RPM (pulses per second * 60)
+        pulseCount = 0;  // Reset pulse count
+        interrupts();  // Re-enable interrupts
+
+        Serial.print("Measured RPM: ");
+        Serial.print(rpm);
+        Serial.print(" | Target RPM: ");
+        Serial.println(targetRPM);
+
+        // Simple PID-like control to adjust PWM
+        if (rpm < targetRPM) {
+            pwmValue += 5; // Increase speed
+        } 
+        else if (rpm > targetRPM) {
+            pwmValue -= 5; // Decrease speed
+        }
+
+        // Constrain PWM value to avoid overflows
+        pwmValue = constrain(pwmValue, 0, 255);
+        analogWrite(pwmPin, pwmValue);  // Update motor speed
+
+        prevTime = currentTime;  // Reset time
+    }
+}
