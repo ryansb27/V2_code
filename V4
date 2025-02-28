@@ -1,0 +1,132 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const int motorPin = 9;  // PWM pin for motor control
+const int sensorPin = 7; // Interrupt pin for phototransistor output
+
+volatile unsigned long pulseCount = 0; 
+unsigned long prevTime = 0;
+float rpm = 0;
+
+int targetRPM = 0;
+int runTime = 0;  // In seconds
+unsigned long startTime = 0;
+bool motorRunning = false;
+
+// Proportional control gain (adjust as needed)
+float Kp = 1.5;  
+int minPWM = 50;  // Ensure motor starts at a minimum PWM
+
+// Initialize I2C LCD (16x2 display, address 0x27)
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+void rpmISR() {
+    pulseCount++; // Increment count on each pulse
+}
+
+void setup() {
+    Serial.begin(9600);
+    pinMode(motorPin, OUTPUT);
+    pinMode(sensorPin, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(sensorPin), rpmISR, RISING);
+
+    // Initialize LCD
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("RPM Control Ready");
+
+    Serial.println("Enter desired RPM and run time (seconds):");
+}
+
+void loop() {
+    if (Serial.available() > 0) {
+        targetRPM = Serial.parseInt();
+        runTime = Serial.parseInt();
+
+        if (targetRPM <= 0 || runTime <= 0) {
+            Serial.println("Invalid input! Enter a valid RPM and time.");
+            return;  // Ignore invalid inputs
+        }
+
+        pulseCount = 0;
+        prevTime = millis();
+        startTime = millis();
+        motorRunning = true;
+
+        Serial.print("Running at ");
+        Serial.print(targetRPM);
+        Serial.print(" RPM for ");
+        Serial.print(runTime);
+        Serial.println(" seconds.");
+
+        lcd.setCursor(0, 0);
+        lcd.print("Target: ");
+        lcd.print(targetRPM);
+        lcd.print(" RPM ");
+        lcd.setCursor(0, 1);
+        lcd.print("Time Left: ");
+        lcd.print(runTime);
+        lcd.print("s  ");
+    }
+
+    if (motorRunning) {
+        unsigned long elapsedTime = (millis() - startTime) / 1000;
+        int timeLeft = runTime - elapsedTime;
+
+        Serial.print("Time Elapsed: ");
+        Serial.print(elapsedTime);
+        Serial.print("s | Time Left: ");
+        Serial.println(timeLeft);
+
+        if (elapsedTime >= runTime) {
+            analogWrite(motorPin, 0);
+            motorRunning = false;
+            Serial.println("Time completed. Enter new values:");
+
+            lcd.setCursor(0, 0);
+            lcd.print("Done! Enter new: ");
+            return;
+        }
+
+        // Calculate actual RPM every 500ms
+        if (millis() - prevTime >= 500) {
+            noInterrupts();
+            float timeElapsed = (millis() - startTime) / 60000.0; // Convert ms to minutes
+            if (timeElapsed > 0) {
+                rpm = (pulseCount / 2.0) / timeElapsed; // Each 2 pulses = 1 rotation
+            }
+            pulseCount = 0;
+            prevTime = millis();
+            interrupts();
+            
+            // Compute error and adjust motor speed
+            float error = targetRPM - rpm;
+            int outputPWM = constrain((Kp * error) + minPWM, 0, 255); // Ensure motor starts
+
+            analogWrite(motorPin, outputPWM);
+
+            Serial.print("Measured RPM: ");
+            Serial.print(rpm);
+            Serial.print(" | PWM: ");
+            Serial.println(outputPWM);
+
+            // Update LCD Display
+            lcd.setCursor(0, 0);
+            lcd.print("Set: ");
+            lcd.print(targetRPM);
+            lcd.print(" RPM  ");
+
+            lcd.setCursor(0, 1);
+            lcd.print("Curr: ");
+            lcd.print(rpm);
+            lcd.print(" RPM  ");
+        }
+
+        // Update time left on LCD every second
+        lcd.setCursor(10, 1);
+        lcd.print("T:");
+        lcd.print(timeLeft);
+        lcd.print("s ");
+    }
+}
