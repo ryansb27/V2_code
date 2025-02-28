@@ -1,0 +1,80 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const int motorPin = 9;  // PWM pin for motor control
+const int sensorPin = 7; // Interrupt pin for phototransistor output
+
+unsigned long startTime = 0;
+int runTime = 0;  // In seconds
+bool motorRunning = false;
+
+// Initialize I2C LCD (16x2 display, address 0x27)
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+void setup() {
+    Serial.begin(9600);
+    pinMode(motorPin, OUTPUT);
+    pinMode(sensorPin, INPUT_PULLUP);
+
+    // Initialize LCD
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("Enter time (s):");
+
+    Serial.println("Enter run time in seconds:");
+}
+
+void loop() {
+    if (Serial.available() > 0 && !motorRunning) {
+        runTime = Serial.parseInt();  // Read the run time from the user
+        if (runTime <= 0) {
+            Serial.println("Invalid input! Enter a valid time.");
+            return;  // Exit if invalid input
+        }
+
+        startTime = millis();  // Record the start time
+        motorRunning = true;
+
+        // Start the motor at 75 PWM
+        analogWrite(motorPin, 75);
+
+        Serial.print("Running for ");
+        Serial.print(runTime);
+        Serial.println(" seconds.");
+
+        // Update LCD with the target run time
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Running for:");
+        lcd.setCursor(0, 1);
+        lcd.print(runTime);
+        lcd.print(" s");
+
+        delay(100);  // Allow time for the user to see the message
+    }
+
+    if (motorRunning) {
+        // Calculate time elapsed
+        unsigned long elapsedTime = (millis() - startTime) / 1000;  // In seconds
+        int timeLeft = runTime - elapsedTime;
+
+        // Update the time left on the LCD every second
+        lcd.setCursor(10, 1);
+        lcd.print("T:");
+        lcd.print(timeLeft);
+        lcd.print("s ");
+
+        // Check if the run time has elapsed
+        if (elapsedTime >= runTime) {
+            analogWrite(motorPin, 0);  // Turn off the motor
+            motorRunning = false;
+            Serial.println("Time completed. Enter new values:");
+
+            // Update LCD when done
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Done! Enter new:");
+        }
+    }
+}
